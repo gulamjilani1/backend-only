@@ -1,11 +1,27 @@
 # Import Flask and required libraries
 from flask import Flask, request, jsonify, send_file
-from models import Customer, Item, Invoice, InvoiceItem, db
+from flask_login import LoginManager, login_required
+from models import db, User, Customer, Item, Invoice, InvoiceItem
+from auth import auth_bp
 from weasyprint import HTML
 import tempfile
 
-# for  creat application learn in cs 50 
+
+# Create Flask application
 app = Flask(__name__)
+app.secret_key = "your-secret-key"  # Needed for Flask-Login sessions
+
+# Init login manager
+login_manager = LoginManager()
+login_manager.init_app(app)
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.get_or_none(int(user_id))
+
+# Register auth blueprint
+app.register_blueprint(auth_bp, url_prefix="/auth")
+
 
 # ---------------- Root API Info ----------------
 @app.route('/')
@@ -30,7 +46,12 @@ def home():
             "POST /invoices": "Create a new invoice",
             "PUT /invoices/<id>": "Update invoice",
             "DELETE /invoices/<id>": "Delete invoice",
-            "GET /invoices/<id>/pdf": "Download invoice PDF"
+            "GET /invoices/<id>/pdf": "Download invoice PDF",
+
+            # Auth
+            "POST /auth/login": "Login with username & password",
+            "POST /auth/logout": "Logout current user",
+            "GET /auth/profile": "View logged in user profile"
         }
     })
 
@@ -40,11 +61,13 @@ def home():
 def list_customers():
     return jsonify([{"id": c.id, "name": c.name, "email": c.email, "phone": c.phone} for c in Customer.select()])
 
+
 @app.route("/customers", methods=["POST"])
 def create_customer():
     data = request.json
     c = Customer.create(name=data["name"], email=data["email"], phone=data["phone"])
     return jsonify({"id": c.id, "name": c.name, "email": c.email, "phone": c.phone})
+
 
 @app.route("/customers/<int:customer_id>", methods=["PUT"])
 def update_customer(customer_id):
@@ -58,6 +81,7 @@ def update_customer(customer_id):
     c.save()
     return jsonify({"message": "Customer updated", "id": c.id})
 
+
 @app.route("/customers/<int:customer_id>", methods=["DELETE"])
 def delete_customer(customer_id):
     c = Customer.get_or_none(customer_id)
@@ -67,16 +91,18 @@ def delete_customer(customer_id):
     return jsonify({"message": "Customer deleted"})
 
 
-# Item CRUD ----------------
+# ---------------- Item CRUD ----------------
 @app.route("/items", methods=["GET"])
 def list_items():
     return jsonify([{"id": i.id, "name": i.name, "price": i.price} for i in Item.select()])
+
 
 @app.route("/items", methods=["POST"])
 def create_item():
     data = request.json
     i = Item.create(name=data["name"], price=data["price"])
     return jsonify({"id": i.id, "name": i.name, "price": i.price})
+
 
 @app.route("/items/<int:item_id>", methods=["PUT"])
 def update_item(item_id):
@@ -89,6 +115,7 @@ def update_item(item_id):
     i.save()
     return jsonify({"message": "Item updated", "id": i.id})
 
+
 @app.route("/items/<int:item_id>", methods=["DELETE"])
 def delete_item(item_id):
     i = Item.get_or_none(item_id)
@@ -98,10 +125,11 @@ def delete_item(item_id):
     return jsonify({"message": "Item deleted"})
 
 
-# Invoice CRUD ----------------
+# ---------------- Invoice CRUD ----------------
 @app.route("/invoices", methods=["GET"])
 def list_invoices():
     return jsonify([{"id": inv.id, "customer": inv.customer.name, "total": inv.total} for inv in Invoice.select()])
+
 
 @app.route("/invoices", methods=["POST"])
 def create_invoice():
@@ -115,6 +143,7 @@ def create_invoice():
     for it in data.get("items", []):
         item = Item.get_or_none(it["item_id"])
         if item:
+            from models import InvoiceItem
             InvoiceItem.create(invoice=inv, item=item.id, quantity=it["quantity"])
             total += item.price * it["quantity"]
 
@@ -122,8 +151,10 @@ def create_invoice():
     inv.save()
     return jsonify({"id": inv.id, "total": inv.total})
 
+
 @app.route("/invoices/<int:invoice_id>", methods=["PUT"])
 def update_invoice(invoice_id):
+    from models import InvoiceItem
     inv = Invoice.get_or_none(invoice_id)
     if not inv:
         return jsonify({"error": "Invoice not found"}), 404
@@ -148,8 +179,10 @@ def update_invoice(invoice_id):
     inv.save()
     return jsonify({"message": "Invoice updated", "id": inv.id})
 
+
 @app.route("/invoices/<int:invoice_id>", methods=["DELETE"])
 def delete_invoice(invoice_id):
+    from models import InvoiceItem
     inv = Invoice.get_or_none(invoice_id)
     if not inv:
         return jsonify({"error": "Invoice not found"}), 404
@@ -158,9 +191,10 @@ def delete_invoice(invoice_id):
     return jsonify({"message": "Invoice deleted"})
 
 
-#  PDF Generation
+# ---------------- PDF Generation ----------------
 @app.route("/invoices/<int:invoice_id>/pdf", methods=["GET"])
 def invoice_pdf(invoice_id):
+    from models import InvoiceItem
     inv = Invoice.get_or_none(invoice_id)
     if not inv:
         return jsonify({"error": "Invoice not found"}), 404
@@ -185,6 +219,6 @@ def invoice_pdf(invoice_id):
     return send_file(temp.name, as_attachment=True, download_name=f"invoice_{inv.id}.pdf")
 
 
-#  Run App 
+# Run App
 if __name__ == "__main__":
     app.run(debug=True)
